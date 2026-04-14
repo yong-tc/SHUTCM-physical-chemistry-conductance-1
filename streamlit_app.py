@@ -4,6 +4,8 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from scipy import stats
+import io
+import base64
 
 # 页面配置
 st.set_page_config(page_title="弱电解质电离平衡常数处理", layout="wide")
@@ -59,98 +61,158 @@ if edited_df.empty:
     st.warning("请至少输入一组数据")
     st.stop()
 
-# 应用校正因子
-conductivity_raw = edited_df.iloc[:, 1].values
-conductivity_corrected = conductivity_raw * correction_factor
-edited_df["校正后电导率 (mS/cm)"] = conductivity_corrected
-edited_df["电导率 (S/m)"] = conductivity_corrected * 0.1
+# 计算按钮
+if st.button("🚀 开始计算", type="primary"):
+    # 应用校正因子
+    conductivity_raw = edited_df.iloc[:, 1].values
+    conductivity_corrected = conductivity_raw * correction_factor
+    edited_df["校正后电导率 (mS/cm)"] = conductivity_corrected
+    edited_df["电导率 (S/m)"] = conductivity_corrected * 0.1
 
-# 计算
-conc_molL = edited_df.iloc[:, 0].values
-conc_molm3 = conc_molL * 1000
-kappa_Sm = edited_df["电导率 (S/m)"].values
+    # 计算
+    conc_molL = edited_df.iloc[:, 0].values
+    conc_molm3 = conc_molL * 1000
+    kappa_Sm = edited_df["电导率 (S/m)"].values
 
-Lambda_m = kappa_Sm / conc_molm3  # S·m²·mol⁻¹
-alpha = Lambda_m / lambda_inf
-Kc = (conc_molL * alpha**2) / (1 - alpha)
+    # 避免除零
+    with np.errstate(divide='ignore', invalid='ignore'):
+        Lambda_m = np.where(conc_molm3 > 0, kappa_Sm / conc_molm3, np.nan)
+        alpha = Lambda_m / lambda_inf
+        Kc = (conc_molL * alpha**2) / (1 - alpha)
 
-# 结果表格
-result_df = pd.DataFrame({
-    "浓度 (mol/L)": conc_molL,
-    "电导率 (mS/cm)": conductivity_corrected,
-    "摩尔电导率 Λₘ (×10⁻⁴ S·m²·mol⁻¹)": Lambda_m * 1e4,
-    "电离度 α": alpha,
-    "平衡常数 Kc (×10⁻⁵)": Kc * 1e5
-})
+    # 结果表格
+    result_df = pd.DataFrame({
+        "浓度 (mol/L)": conc_molL,
+        "电导率 (mS/cm)": conductivity_corrected,
+        "摩尔电导率 Λₘ (×10⁻⁴ S·m²·mol⁻¹)": Lambda_m * 1e4,
+        "电离度 α": alpha,
+        "平衡常数 Kc (×10⁻⁵)": Kc * 1e5
+    })
 
-st.subheader("📊 计算结果")
-st.dataframe(result_df, use_container_width=True)
+    st.subheader("📊 计算结果")
+    st.dataframe(result_df, use_container_width=True)
 
-# 统计 Kc
-Kc_mean = np.mean(Kc)
-Kc_std = np.std(Kc, ddof=1)
-st.success(f"**平均 Kc = {Kc_mean:.3e} mol/L**")
-st.info(f"标准差 = {Kc_std:.3e} mol/L, 相对标准差 = {Kc_std/Kc_mean*100:.2f}%")
-theoretical = 1.75e-5
-st.write(f"参考理论值 (25°C) : 1.75×10⁻⁵, 相对误差 = {abs(Kc_mean-theoretical)/theoretical*100:.2f}%")
-
-# 绘图
-st.subheader("📈 图表分析")
-tab1, tab2, tab3, tab4 = st.tabs(["Λₘ - c", "α - c", "Kc 分布", "Ostwald 稀释定律验证"])
-
-with tab1:
-    fig1 = px.scatter(result_df, x="浓度 (mol/L)", y="摩尔电导率 Λₘ (×10⁻⁴ S·m²·mol⁻¹)",
-                      title="摩尔电导率随浓度的变化", log_x=True, trendline=None)
-    st.plotly_chart(fig1, use_container_width=True)
-
-with tab2:
-    fig2 = px.scatter(result_df, x="浓度 (mol/L)", y="电离度 α",
-                      title="电离度随浓度的变化", log_x=True, trendline=None)
-    st.plotly_chart(fig2, use_container_width=True)
-
-with tab3:
-    fig3 = px.bar(result_df, x="浓度 (mol/L)", y="平衡常数 Kc (×10⁻⁵)",
-                  title="各浓度下的 Kc 值", text_auto=True)
-    fig3.add_hline(y=Kc_mean*1e5, line_dash="dash", line_color="red",
-                   annotation_text=f"平均值 = {Kc_mean:.2e}")
-    st.plotly_chart(fig3, use_container_width=True)
-
-with tab4:
-    x_ost = 1.0 / Lambda_m
-    y_ost = conc_molL * Lambda_m
-    valid_idx = np.isfinite(x_ost) & np.isfinite(y_ost)
-    if np.sum(valid_idx) >= 2:
-        slope, intercept, r_value, p_value, std_err = stats.linregress(x_ost[valid_idx], y_ost[valid_idx])
-        fig4 = px.scatter(x=x_ost[valid_idx], y=y_ost[valid_idx],
-                          labels={"x": "1/Λₘ (mol·m⁻³·S⁻¹·m²)", "y": "c·Λₘ (S·m²·mol⁻¹·mol/L)"},
-                          title="Ostwald 稀释定律验证")
-        x_line = np.array([min(x_ost[valid_idx]), max(x_ost[valid_idx])])
-        y_line = slope * x_line + intercept
-        fig4.add_trace(go.Scatter(x=x_line, y=y_line, mode="lines", name=f"拟合线 (R²={r_value**2:.3f})"))
-        st.plotly_chart(fig4, use_container_width=True)
-        st.write(f"拟合方程: cΛₘ = {slope:.2e} × (1/Λₘ) + {intercept:.2e}")
+    # 统计 Kc（忽略NaN）
+    Kc_valid = Kc[np.isfinite(Kc)]
+    if len(Kc_valid) > 0:
+        Kc_mean = np.mean(Kc_valid)
+        Kc_std = np.std(Kc_valid, ddof=1) if len(Kc_valid) > 1 else 0.0
+        st.success(f"**平均 Kc = {Kc_mean:.3e} mol/L**")
+        if len(Kc_valid) > 1:
+            st.info(f"标准差 = {Kc_std:.3e} mol/L, 相对标准差 = {Kc_std/Kc_mean*100:.2f}%")
+        theoretical = 1.75e-5
+        st.write(f"参考理论值 (25°C) : 1.75×10⁻⁵, 相对误差 = {abs(Kc_mean-theoretical)/theoretical*100:.2f}%")
     else:
-        st.warning("数据点不足，无法进行线性拟合")
+        st.warning("无法计算有效的Kc值")
+        Kc_mean = np.nan
 
-# 导出和打印功能
-st.subheader("💾 导出与打印")
-col1, col2 = st.columns(2)
-with col1:
-    csv_data = result_df.to_csv(index=False).encode("utf-8")
-    st.download_button("📥 下载计算结果 CSV", csv_data, "weak_acid_results.csv", "text/csv")
-with col2:
-    # 打印按钮：调用浏览器打印功能
-    st.markdown("""
-        <button id="printButton" style="background-color:#4CAF50; border:none; color:white; padding:0.5rem 1rem; border-radius:0.5rem; cursor:pointer;">
-            🖨️ 打印本页
-        </button>
-        <script>
-            const btn = document.getElementById('printButton');
-            btn.addEventListener('click', () => {
-                window.print();
-            });
-        </script>
-    """, unsafe_allow_html=True)
+    # 绘图（只有足够数据点才显示）
+    st.subheader("📈 图表分析")
+    tab1, tab2, tab3, tab4 = st.tabs(["Λₘ - c", "α - c", "Kc 分布", "Ostwald 稀释定律验证"])
 
-st.markdown("---")
-st.caption("实验原理：Λₘ = κ / c, α = Λₘ / Λₘ∞, Kc = c·α²/(1-α)")
+    with tab1:
+        if len(conc_molL) >= 2:
+            fig1 = px.scatter(result_df, x="浓度 (mol/L)", y="摩尔电导率 Λₘ (×10⁻⁴ S·m²·mol⁻¹)",
+                              title="摩尔电导率随浓度的变化", log_x=True, trendline=None)
+            st.plotly_chart(fig1, use_container_width=True)
+        else:
+            st.info("至少需要2个数据点才能绘制此图")
+
+    with tab2:
+        if len(conc_molL) >= 2:
+            fig2 = px.scatter(result_df, x="浓度 (mol/L)", y="电离度 α",
+                              title="电离度随浓度的变化", log_x=True, trendline=None)
+            st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.info("至少需要2个数据点才能绘制此图")
+
+    with tab3:
+        if len(conc_molL) >= 1:
+            fig3 = px.bar(result_df, x="浓度 (mol/L)", y="平衡常数 Kc (×10⁻⁵)",
+                          title="各浓度下的 Kc 值", text_auto=True)
+            if not np.isnan(Kc_mean):
+                fig3.add_hline(y=Kc_mean*1e5, line_dash="dash", line_color="red",
+                               annotation_text=f"平均值 = {Kc_mean:.2e}")
+            st.plotly_chart(fig3, use_container_width=True)
+        else:
+            st.info("数据点不足，无法绘制Kc分布图")
+
+    with tab4:
+        # 需要至少2个有效点进行线性回归
+        x_ost = 1.0 / Lambda_m
+        y_ost = conc_molL * Lambda_m
+        valid_idx = np.isfinite(x_ost) & np.isfinite(y_ost)
+        if np.sum(valid_idx) >= 2:
+            slope, intercept, r_value, p_value, std_err = stats.linregress(x_ost[valid_idx], y_ost[valid_idx])
+            fig4 = px.scatter(x=x_ost[valid_idx], y=y_ost[valid_idx],
+                              labels={"x": "1/Λₘ (mol·m⁻³·S⁻¹·m²)", "y": "c·Λₘ (S·m²·mol⁻¹·mol/L)"},
+                              title="Ostwald 稀释定律验证")
+            x_line = np.array([min(x_ost[valid_idx]), max(x_ost[valid_idx])])
+            y_line = slope * x_line + intercept
+            fig4.add_trace(go.Scatter(x=x_line, y=y_line, mode="lines", name=f"拟合线 (R²={r_value**2:.3f})"))
+            st.plotly_chart(fig4, use_container_width=True)
+            st.write(f"拟合方程: cΛₘ = {slope:.2e} × (1/Λₘ) + {intercept:.2e}")
+        else:
+            st.info("至少需要2个有效数据点才能进行Ostwald稀释定律验证")
+
+    # 导出和打印功能
+    st.subheader("💾 导出与打印")
+    col1, col2 = st.columns(2)
+    with col1:
+        csv_data = result_df.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 下载计算结果 CSV", csv_data, "weak_acid_results.csv", "text/csv")
+    with col2:
+        # 生成打印报告：新窗口打开，包含所有结果和图表
+        # 将当前计算结果和图表转为HTML，并打开新窗口打印
+        if st.button("🖨️ 打印报告"):
+            # 构建报告HTML
+            report_html = f"""
+            <html>
+            <head>
+                <title>电导法测定弱电解质电离平衡常数报告</title>
+                <meta charset="UTF-8">
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                    h1 {{ color: #2c3e50; }}
+                    h2 {{ color: #34495e; border-bottom: 1px solid #ddd; }}
+                    table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
+                    th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
+                    th {{ background-color: #f2f2f2; }}
+                    .chart {{ margin: 20px 0; }}
+                </style>
+            </head>
+            <body>
+                <h1>电导法测定弱电解质的电离平衡常数实验报告</h1>
+                <p><strong>生成时间：</strong> {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <h2>1. 原始数据与计算结果</h2>
+                {result_df.to_html(index=False)}
+                <h2>2. 统计结果</h2>
+                <p>平均 Kc = {Kc_mean:.3e} mol/L</p>
+                <p>参考理论值 (25°C) : 1.75×10⁻⁵ mol/L, 相对误差 = {abs(Kc_mean-theoretical)/theoretical*100:.2f}%</p>
+                <h2>3. 图表</h2>
+            """
+            # 嵌入图表（需将plotly图转为HTML）
+            # 由于无法在后台执行plotly转换，我们采用简单提示，用户可自行截图
+            report_html += "<p>图表请参见应用界面截图或使用导出功能。</p>"
+            report_html += """
+                <script>
+                    window.onload = function() {
+                        window.print();
+                    };
+                </script>
+            </body>
+            </html>
+            """
+            # 使用base64编码打开新窗口
+            b64 = base64.b64encode(report_html.encode()).decode()
+            js = f'''
+                var newWindow = window.open();
+                newWindow.document.write(atob("{b64}"));
+                newWindow.document.close();
+            '''
+            st.components.v1.html(f"<script>{js}</script>", height=0)
+
+    st.markdown("---")
+    st.caption("实验原理：Λₘ = κ / c, α = Λₘ / Λₘ∞, Kc = c·α²/(1-α)")
+else:
+    st.info("👆 请输入或上传数据后，点击「开始计算」按钮查看结果")
