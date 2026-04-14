@@ -1,19 +1,24 @@
-# 🎈 Blank app template
+# 电导法测定弱电解质的电离平衡常数 – 数据处理工具
 
-A simple Streamlit app template for you to modify!
+## 简介
+本工具用于处理“电导法测定醋酸电离平衡常数”实验数据，支持电极常数校正、自动计算、图表绘制和结果导出。
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
+## 使用方法
+1. 安装依赖：`pip install -r requirements.txt`
+2. 运行：`streamlit run app.py`
+3. 在侧边栏设置参数，输入浓度和电导率，查看结果。
 
-### How to run it on your own machine
+## 功能
+- 电极常数校正
+- 摩尔电导率、电离度、Kc 计算
+- 四种图表可视化
+- 结果导出 CSV
 
-1. Install the requirements
+## 文件结构
+- app.py : 主程序
+- requirements.txt : 依赖包
+- README.md : 本文件
 
-   ```
-   $ pip install -r requirements.txt
-   ```
-
-2. Run the app
-
-   ```
-   $ streamlit run streamlit_app.py
-   ```
+## 注意事项
+- 电导率单位统一为 mS/cm
+- 默认 Λₘ∞ 适用于 25°C，如需其他温度请手动修改
