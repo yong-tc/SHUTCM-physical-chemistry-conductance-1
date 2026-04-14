@@ -4,8 +4,8 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from scipy import stats
-import base64
 import plotly.io as pio
+import io
 
 # 页面配置
 st.set_page_config(page_title="弱电解质电离平衡常数处理", layout="wide")
@@ -109,7 +109,6 @@ if st.button("🚀 开始计算", type="primary"):
     st.subheader("📈 图表分析")
     tab1, tab2, tab3, tab4 = st.tabs(["Λₘ - c", "α - c", "Kc 分布", "Ostwald 稀释定律验证"])
 
-    # 创建图表对象（用于显示和报告）
     fig1 = fig2 = fig3 = fig4 = None
     with tab1:
         if len(conc_molL) >= 2:
@@ -162,37 +161,36 @@ if st.button("🚀 开始计算", type="primary"):
         csv_data = result_df.to_csv(index=False).encode("utf-8")
         st.download_button("📥 下载计算结果 CSV", csv_data, "weak_acid_results.csv", "text/csv")
     with col2:
-        # 生成PDF报告（通过HTML+打印对话框实现）
-        if st.button("🖨️ 打印报告 (生成PDF)"):
+        # 生成 HTML 报告文件并下载
+        if st.button("📄 导出报告为 HTML (可打印为 PDF)"):
             # 构建报告HTML
             html_parts = []
-            html_parts.append("""
+            html_parts.append(f"""
             <html>
             <head>
                 <title>电导法测定弱电解质电离平衡常数报告</title>
                 <meta charset="UTF-8">
                 <style>
-                    body { font-family: Arial, sans-serif; margin: 40px; }
-                    h1 { color: #2c3e50; }
-                    h2 { color: #34495e; border-bottom: 1px solid #ddd; }
-                    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-                    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-                    th { background-color: #f2f2f2; }
-                    .chart { margin: 30px 0; }
+                    body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                    h1 {{ color: #2c3e50; }}
+                    h2 {{ color: #34495e; border-bottom: 1px solid #ddd; }}
+                    table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
+                    th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
+                    th {{ background-color: #f2f2f2; }}
+                    .chart {{ margin: 30px 0; }}
                 </style>
             </head>
             <body>
                 <h1>电导法测定弱电解质的电离平衡常数实验报告</h1>
-                <p><strong>生成时间：</strong> """ + pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S') + """</p>
+                <p><strong>生成时间：</strong> {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                 <h2>1. 原始数据与计算结果</h2>
-                """ + result_df.to_html(index=False) + """
+                {result_df.to_html(index=False)}
                 <h2>2. 统计结果</h2>
-                <p>平均 Kc = {:.3e} mol/L</p>
-                <p>参考理论值 (25°C) : 1.75×10⁻⁵ mol/L, 相对误差 = {:.2f}%</p>
+                <p>平均 Kc = {Kc_mean:.3e} mol/L</p>
+                <p>参考理论值 (25°C) : 1.75×10⁻⁵ mol/L, 相对误差 = {abs(Kc_mean-theoretical)/theoretical*100:.2f}%</p>
                 <h2>3. 图表</h2>
-            """.format(Kc_mean, abs(Kc_mean-theoretical)/theoretical*100 if not np.isnan(Kc_mean) else 0))
-
-            # 嵌入图表HTML
+            """)
+            # 嵌入图表
             if fig1 is not None:
                 html_parts.append('<div class="chart"><h3>摩尔电导率随浓度的变化</h3>')
                 html_parts.append(pio.to_html(fig1, full_html=False, include_plotlyjs='cdn'))
@@ -209,25 +207,16 @@ if st.button("🚀 开始计算", type="primary"):
                 html_parts.append('<div class="chart"><h3>Ostwald 稀释定律验证</h3>')
                 html_parts.append(pio.to_html(fig4, full_html=False, include_plotlyjs='cdn'))
                 html_parts.append('</div>')
-
-            html_parts.append("""
-                <script>
-                    window.onload = function() {
-                        window.print();
-                    };
-                </script>
-            </body>
-            </html>
-            """)
+            html_parts.append("</body></html>")
             full_html = "".join(html_parts)
-            # 使用 base64 编码打开新窗口
-            b64 = base64.b64encode(full_html.encode()).decode()
-            js = f'''
-                var newWindow = window.open();
-                newWindow.document.write(atob("{b64}"));
-                newWindow.document.close();
-            '''
-            st.components.v1.html(f"<script>{js}</script>", height=0)
+            # 提供下载
+            st.download_button(
+                label="📄 点击下载 HTML 报告",
+                data=full_html.encode("utf-8"),
+                file_name="weak_acid_report.html",
+                mime="text/html"
+            )
+            st.info("下载后，用浏览器打开该 HTML 文件，然后按 Ctrl+P (或 Cmd+P) 选择「另存为 PDF」即可生成 PDF 报告。")
 
     st.markdown("---")
     st.caption("实验原理：Λₘ = κ / c, α = Λₘ / Λₘ∞, Kc = c·α²/(1-α)")
