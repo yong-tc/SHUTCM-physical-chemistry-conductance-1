@@ -220,7 +220,7 @@ if st.session_state.calculated:
         <html>
         <head><meta charset="UTF-8"><title>弱电解质电离平衡常数报告</title>
         <style>
-            body {{ font-family: Arial, sans-serif; margin: 40px; }}
+            body {{ font-family: 'SimSun', '宋体', 'Microsoft YaHei', Arial, sans-serif; margin: 40px; }}
             h1 {{ color: #2c3e50; }}
             h2 {{ color: #34495e; border-bottom: 1px solid #ddd; }}
             table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
@@ -245,15 +245,15 @@ if st.session_state.calculated:
         full_html = "".join(html_parts)
         st.download_button("📄 下载 HTML 报告", full_html.encode("utf-8"), "weak_acid_report.html", "text/html")
     with col3:
-        # 一键生成 PDF 按钮：基于 session_state 中的 HTML 内容，通过 jsPDF 或直接打开打印窗口
-        # 由于我们已经有了 fig_html_list 和 result_df，可以构造一个完整的报告 HTML，然后在新窗口打印
+        # 生成 PDF 报告：使用 Blob 和 URL.createObjectURL 打开新窗口并打印（避免 base64 乱码）
         report_html = f"""
+        <!DOCTYPE html>
         <html>
         <head>
-            <title>弱电解质电离平衡常数报告</title>
             <meta charset="UTF-8">
+            <title>弱电解质电离平衡常数报告</title>
             <style>
-                body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                body {{ font-family: 'SimSun', '宋体', 'Microsoft YaHei', Arial, sans-serif; margin: 40px; }}
                 h1 {{ color: #2c3e50; }}
                 h2 {{ color: #34495e; border-bottom: 1px solid #ddd; }}
                 table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
@@ -274,23 +274,23 @@ if st.session_state.calculated:
             <h2>3. 图表</h2>
         """
         for title, html in fig_html_list:
-            # 注意：html 中已经包含了 plotly 的 div 和脚本，但可能缺少 plotly.js，已经在 head 中添加了
             report_html += f'<div class="chart"><h3>{title}</h3>{html}</div>'
         report_html += """
         </body>
         </html>
         """
-        # 使用 base64 编码打开新窗口并打印
-        b64 = base64.b64encode(report_html.encode()).decode()
+        # 使用 JavaScript Blob 方式打开新窗口并打印
         js_code = f"""
-        var win = window.open();
-        win.document.write(atob("{b64}"));
-        win.document.close();
-        win.print();
+        var blob = new Blob([`{report_html}`], {{type: 'text/html'}});
+        var url = URL.createObjectURL(blob);
+        var win = window.open(url);
+        win.onload = function() {{
+            win.print();
+        }};
         """
         st.components.v1.html(f"<script>{js_code}</script>", height=0)
-        st.info("点击下方按钮将生成报告并打开打印窗口，请在弹出的打印对话框中选择「另存为 PDF」。")
         if st.button("🖨️ 生成 PDF 报告"):
             st.components.v1.html(f"<script>{js_code}</script>", height=0)
+            st.success("报告已在新窗口打开，请在弹出的打印对话框中选择「另存为 PDF」。如果未弹出，请检查浏览器是否拦截了弹窗。")
 else:
     st.info("👆 请输入或上传数据后，点击「开始计算」按钮查看结果")
