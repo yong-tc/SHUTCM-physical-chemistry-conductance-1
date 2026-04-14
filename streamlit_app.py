@@ -250,9 +250,9 @@ if st.session_state.calculated:
         full_html = "".join(html_parts)
         st.download_button("📄 下载 HTML 报告", full_html.encode("utf-8"), "weak_acid_report.html", "text/html")
     with col3:
-        # 一键生成 PDF（采用试剂管理系统的打印方案）
+        # 一键生成 PDF（采用分页避免控制）
         if st.button("🖨️ 生成 PDF 报告"):
-            # 构建完整报告 HTML（包含图表和表格）
+            # 构建完整报告 HTML，添加避免图表跨页的 CSS
             pdf_html_parts = []
             pdf_html_parts.append(f"""
             <html>
@@ -260,13 +260,22 @@ if st.session_state.calculated:
                 <meta charset="UTF-8">
                 <title>弱电解质电离平衡常数实验报告</title>
                 <style>
-                    body {{ font-family: 'SimHei', 'Microsoft YaHei', Arial, sans-serif; margin: 40px; }}
+                    body {{ font-family: 'SimHei', 'Microsoft YaHei', Arial, sans-serif; margin: 20px; }}
                     h1 {{ color: #2c3e50; }}
                     h2 {{ color: #34495e; border-bottom: 1px solid #ddd; }}
                     table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
                     th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
                     th {{ background-color: #f2f2f2; }}
-                    .chart {{ margin: 30px 0; }}
+                    .chart {{
+                        margin: 30px 0;
+                        page-break-inside: avoid;
+                        break-inside: avoid;
+                    }}
+                    /* 确保表格也不跨页 */
+                    table {{
+                        page-break-inside: avoid;
+                        break-inside: avoid;
+                    }}
                 </style>
                 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
             </head>
