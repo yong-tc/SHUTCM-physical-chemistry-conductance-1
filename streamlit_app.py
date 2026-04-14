@@ -4,8 +4,8 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from scipy import stats
-import io
 import base64
+import plotly.io as pio
 
 # 页面配置
 st.set_page_config(page_title="弱电解质电离平衡常数处理", layout="wide")
@@ -74,7 +74,6 @@ if st.button("🚀 开始计算", type="primary"):
     conc_molm3 = conc_molL * 1000
     kappa_Sm = edited_df["电导率 (S/m)"].values
 
-    # 避免除零
     with np.errstate(divide='ignore', invalid='ignore'):
         Lambda_m = np.where(conc_molm3 > 0, kappa_Sm / conc_molm3, np.nan)
         alpha = Lambda_m / lambda_inf
@@ -92,7 +91,7 @@ if st.button("🚀 开始计算", type="primary"):
     st.subheader("📊 计算结果")
     st.dataframe(result_df, use_container_width=True)
 
-    # 统计 Kc（忽略NaN）
+    # 统计 Kc
     Kc_valid = Kc[np.isfinite(Kc)]
     if len(Kc_valid) > 0:
         Kc_mean = np.mean(Kc_valid)
@@ -106,10 +105,12 @@ if st.button("🚀 开始计算", type="primary"):
         st.warning("无法计算有效的Kc值")
         Kc_mean = np.nan
 
-    # 绘图（只有足够数据点才显示）
+    # 绘图（存储到变量以便报告使用）
     st.subheader("📈 图表分析")
     tab1, tab2, tab3, tab4 = st.tabs(["Λₘ - c", "α - c", "Kc 分布", "Ostwald 稀释定律验证"])
 
+    # 创建图表对象（用于显示和报告）
+    fig1 = fig2 = fig3 = fig4 = None
     with tab1:
         if len(conc_molL) >= 2:
             fig1 = px.scatter(result_df, x="浓度 (mol/L)", y="摩尔电导率 Λₘ (×10⁻⁴ S·m²·mol⁻¹)",
@@ -138,7 +139,6 @@ if st.button("🚀 开始计算", type="primary"):
             st.info("数据点不足，无法绘制Kc分布图")
 
     with tab4:
-        # 需要至少2个有效点进行线性回归
         x_ost = 1.0 / Lambda_m
         y_ost = conc_molL * Lambda_m
         valid_idx = np.isfinite(x_ost) & np.isfinite(y_ost)
@@ -162,39 +162,55 @@ if st.button("🚀 开始计算", type="primary"):
         csv_data = result_df.to_csv(index=False).encode("utf-8")
         st.download_button("📥 下载计算结果 CSV", csv_data, "weak_acid_results.csv", "text/csv")
     with col2:
-        # 生成打印报告：新窗口打开，包含所有结果和图表
-        # 将当前计算结果和图表转为HTML，并打开新窗口打印
-        if st.button("🖨️ 打印报告"):
+        # 生成PDF报告（通过HTML+打印对话框实现）
+        if st.button("🖨️ 打印报告 (生成PDF)"):
             # 构建报告HTML
-            report_html = f"""
+            html_parts = []
+            html_parts.append("""
             <html>
             <head>
                 <title>电导法测定弱电解质电离平衡常数报告</title>
                 <meta charset="UTF-8">
                 <style>
-                    body {{ font-family: Arial, sans-serif; margin: 40px; }}
-                    h1 {{ color: #2c3e50; }}
-                    h2 {{ color: #34495e; border-bottom: 1px solid #ddd; }}
-                    table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
-                    th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
-                    th {{ background-color: #f2f2f2; }}
-                    .chart {{ margin: 20px 0; }}
+                    body { font-family: Arial, sans-serif; margin: 40px; }
+                    h1 { color: #2c3e50; }
+                    h2 { color: #34495e; border-bottom: 1px solid #ddd; }
+                    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+                    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+                    th { background-color: #f2f2f2; }
+                    .chart { margin: 30px 0; }
                 </style>
             </head>
             <body>
                 <h1>电导法测定弱电解质的电离平衡常数实验报告</h1>
-                <p><strong>生成时间：</strong> {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p><strong>生成时间：</strong> """ + pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S') + """</p>
                 <h2>1. 原始数据与计算结果</h2>
-                {result_df.to_html(index=False)}
+                """ + result_df.to_html(index=False) + """
                 <h2>2. 统计结果</h2>
-                <p>平均 Kc = {Kc_mean:.3e} mol/L</p>
-                <p>参考理论值 (25°C) : 1.75×10⁻⁵ mol/L, 相对误差 = {abs(Kc_mean-theoretical)/theoretical*100:.2f}%</p>
+                <p>平均 Kc = {:.3e} mol/L</p>
+                <p>参考理论值 (25°C) : 1.75×10⁻⁵ mol/L, 相对误差 = {:.2f}%</p>
                 <h2>3. 图表</h2>
-            """
-            # 嵌入图表（需将plotly图转为HTML）
-            # 由于无法在后台执行plotly转换，我们采用简单提示，用户可自行截图
-            report_html += "<p>图表请参见应用界面截图或使用导出功能。</p>"
-            report_html += """
+            """.format(Kc_mean, abs(Kc_mean-theoretical)/theoretical*100 if not np.isnan(Kc_mean) else 0))
+
+            # 嵌入图表HTML
+            if fig1 is not None:
+                html_parts.append('<div class="chart"><h3>摩尔电导率随浓度的变化</h3>')
+                html_parts.append(pio.to_html(fig1, full_html=False, include_plotlyjs='cdn'))
+                html_parts.append('</div>')
+            if fig2 is not None:
+                html_parts.append('<div class="chart"><h3>电离度随浓度的变化</h3>')
+                html_parts.append(pio.to_html(fig2, full_html=False, include_plotlyjs='cdn'))
+                html_parts.append('</div>')
+            if fig3 is not None:
+                html_parts.append('<div class="chart"><h3>各浓度下的 Kc 值</h3>')
+                html_parts.append(pio.to_html(fig3, full_html=False, include_plotlyjs='cdn'))
+                html_parts.append('</div>')
+            if fig4 is not None:
+                html_parts.append('<div class="chart"><h3>Ostwald 稀释定律验证</h3>')
+                html_parts.append(pio.to_html(fig4, full_html=False, include_plotlyjs='cdn'))
+                html_parts.append('</div>')
+
+            html_parts.append("""
                 <script>
                     window.onload = function() {
                         window.print();
@@ -202,9 +218,10 @@ if st.button("🚀 开始计算", type="primary"):
                 </script>
             </body>
             </html>
-            """
-            # 使用base64编码打开新窗口
-            b64 = base64.b64encode(report_html.encode()).decode()
+            """)
+            full_html = "".join(html_parts)
+            # 使用 base64 编码打开新窗口
+            b64 = base64.b64encode(full_html.encode()).decode()
             js = f'''
                 var newWindow = window.open();
                 newWindow.document.write(atob("{b64}"));
